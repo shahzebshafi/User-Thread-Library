@@ -14,13 +14,11 @@
 static struct sigaction old_action;
 static struct itimerval old_timer;
 static sigset_t block_sig;
-volatile sig_atomic_t counter = 0; /*Counter for testing */
 
 void signal_handler(int signal)
 {
     if (signal == SIGVTALRM) {
-            counter++;
-            /*uthread_yield() */
+            uthread_yield()
     }
 }
 
@@ -86,15 +84,3 @@ void preempt_stop(void)
     }
     printf("preempt_stop\n");
 }
-
-int main(void)
-{
-    preempt_start(true); /* start preemption */
-
-    for (int i = 0; i < 1000000; i++) {
-        printf("%d\n", i);
-    }
-    preempt_stop(); /* stop preemption */
-    printf("counter: %d\n", counter);  /*Show how many times the signal handler was called, for testing */
-
-    return 0;
