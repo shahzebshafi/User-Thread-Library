@@ -1,0 +1,201 @@
+#include <assert.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
+
+#include "private.h"
+#include "uthread.h"
+#include "queue.h"
+
+/* Thread States */
+#define blocked 0
+#define ready 1
+#define running 2
+#define idle 3
+#define exited 4
+
+struct uthread_tcb {
+	int state;
+	uthread_ctx_t *context;
+	uthread_fun_t func;
+	void *arg;
+	void *top_of_stack;
+};
+
+/* thread queue */
+queue_t queue;
+queue_t idle_q;
+struct uthread_tcb *main_thread;
+struct uthread_tcb *running_thread;
+
+struct uthread_tcb *uthread_current(void)
+{
+	return running_thread;
+}
+
+/* running thread will be at top of queue */
+void top_queue(queue_t queue){
+	/* current thread */
+	struct uthread_tcb *uthread_current;
+	uthread_current = malloc(sizeof(struct uthread_tcb));
+	uthread_current->top_of_stack = uthread_ctx_alloc_stack();
+	uthread_current->context = uthread_ctx_alloc_stack();
+	/* running thread */
+	running_thread = malloc(sizeof(struct uthread_tcb));
+	running_thread->top_of_stack = uthread_ctx_alloc_stack();
+	running_thread->context = uthread_ctx_alloc_stack();
+
+	queue_t wait = queue_create();
+	for(int i = 0, length = queue_lenth(queue); i < length; i++){
+		if(!queue_dequeue(queue,(void**)&uthread_current)){
+			if(uthread_current->state != running){
+				queue_enqueue(wait,(void*)uthread_current);
+			}
+			else{
+				running_thread = uthread_current;
+			}
+		}
+	}
+	queue_enqueue(queue, runnint_thread);
+	for(int i = 0, waitlen = queue(wait); i < waitlen; i++){
+		if(!queue_dequeue(wait,(void**)&uthread_current)){
+			queue_enqueue(queue,(void*)uthread_current);
+		}
+	}
+}
+
+void uthread_yield(void)
+{
+	struct uthread_tcb *uthread_current;
+	uthread_current = malloc(sizeof(struct uthread_tcb));
+	uthread_current->top_of_stack = uthread_ctx_alloc_stack();
+	uthread_current->context = uthread_ctx_alloc_stack();
+	
+	struct uthread_tcb* next_thread;
+	next_thread = malloc(sizeof(struct uthread_tcb));
+	next_thread->top_of_stack = uthread_ctx_alloc_stack();
+	next_thread->context = uthread_ctx_alloc_stack();
+
+	if(running_thread->state == exited){
+		if(!queue_dequeue(queue,(void**)&next_thread)){
+			queue_enqueue(queue,(void*)next_thread);
+		}
+		next_thread->state = running;
+		top_queue(queue);
+		uthread_ctx_switch(running_thread->context, next_thread->context);
+	}
+	top_queue(queue);
+	if(!queue_dequeue(queue,(void**)&next_thread)){
+		next_thread->state = running;
+	}
+	if(uthread_current->state != running){
+		queue_enqueue(queue,(void*)next_thread);
+	}
+	else{
+		uthread_current->state = ready;
+		queue_enqueue(queue,(void*)next_thread);
+		queue_enqueue(queue,(void*)uthread_current);
+	}
+	top_queue(queue);
+	uthread_ctx_switch(uthread_current->context, next_thread->context);
+}
+
+void uthread_exit(void)
+{
+	int queue_len = queue_length(queue);
+	if(!queue_dequeue(queue,(void**)&running_thread)){
+		running_thread->state = exited;
+	}
+	if(queue_len > 1){
+		uthread_yield();
+	}
+	elseif(queue_len == 1){
+		struct uthread_tcb *next_thread;
+		next_thread = malloc(sizeof(struct uthread_tcb));
+		if(!queue_dequeue(idle_q,(void**)&next_thread)){
+			uthread_ctx_switch(running_thread->context, next_thread->context);
+		}
+	}
+}
+
+int uthread_create(uthread_func_t func, void *arg)
+{
+	struct uthread_tcb *new_thread = malloc(sizeof(struct uthread_tcb));
+	if(new_thread == NULL){
+		return -1;
+	}
+	new_thread->context = malloc(sizeof(uthread_ctx_t));
+	new_thread->func = func;
+	new_thread->arg = arg;
+	new_thread->state = ready;
+	new_thread->top_of_stack = uthread_ctx_alloc_stack();
+	queue_enqueue(queue,new_thread);
+	if(new_thread->top_of_stack == NULL){
+		return -1;
+	}
+	if(uthread_ctx_init(new_thread->context, new_thread->top_of_stack, new_thread->func, new_thread->arg) == -1)
+	{
+		return -1;
+	}
+	return 0;
+}
+
+int uthread_run(bool preempt, uthread_func_t func, void *arg)
+{
+	struct uthread_tcb* main_thread = malloc(sizeof(struct uthread_tcb));
+	main_thread->context = malloc(sizeof(uthread_ctx_t));
+	if (main_thread == NULL||main_thread->context == NULL){
+		return -1;
+	}
+	if(queue == NULL){
+		struct uthread_tcb *initial_thread;
+		initial_thread = malloc(sizeof(struct uthread_tcb));
+		initial_thread->top_of_stack = uthread_ctx_alloc_stack();
+		initial_thread->context = uthread_ctx_alloc_stack();
+		queue = queue_create();
+		idle_queue = queue_create();
+		main_thread->func = NULL;
+		main_thread->state = idle;
+		main_thread->arg = NULL;
+		uthread_create(func, arg);
+		if(!queue_dequeue(queue,(void**)&initial_thread)) {
+			initial_thread->state = running;
+			queue_enqueue(queue,(void*)initial_thread);
+			queue_enqueue(idle_queue,(void*)main_thread);
+			fix_queue(queue);
+			uthread_ctx_switch(main_thread->context,initial_thread->context);
+		}
+	}
+	while(queue_length(queue) >= 1){
+		if(queue_length(queue) == 1){
+			struct uthread_tcb *final_thread;
+			final_thread = malloc(sizeof(struct uthread_tcb));
+			final_thread->top_of_stack = uthread_ctx_alloc_stack();
+			final_thread->context = uthread_ctx_alloc_stack();
+			if(!queue_dequeue(queue,(void**)&final_thread)){
+				final_thread->state = running;
+				uthread_ctx_switch(main_thread->context,final_thread->context);
+			}
+			return 0;
+		}
+		else{
+			uthread_yield();
+		}
+	}
+
+	return 1;
+}
+
+void uthread_block(void)
+{
+	/* TODO Phase 3 */
+}
+
+void uthread_unblock(struct uthread_tcb *uthread)
+{
+	/* TODO Phase 3 */
+}
+
