@@ -6,74 +6,80 @@
 #include "queue.h"
 #include "sem.h"
 #include "private.h"
+#include "uthread.h"
 
-struct semaphore {
+typedef struct semaphore {
 	size_t count;
-	queue_t wait_list;
-};
-	
-extern queue_t queue;
+	queue_t wait_queue;
+}semaphore;
 
-struct uthread_tcb{
+typedef struct uthread_tcb{
 	int state;
 	uthread_ctx_t *context;
 	uthread_func_t func;
 	void *arg;
 	void *top_of_stack;
-};
+}uthread_tcb;
+
+static queue_t queue;
 
 sem_t sem_create(size_t count)
 {
-	struct semaphore* new_sem = malloc(sizeof(struct semaphore));
-	new_sem->wait_list = queue_create();
-	if(new_sem == NULL){
+	semaphore* sem = malloc(sizeof(semaphore));
+	if(!sem){
 		return NULL;
 	}
-	else{
-		new_sem->count = count;
-		return new_sem;
-	}
+	sem->wait_queue = queue_create();
+	sem->count = count;
+	return sem;
 }
 
 int sem_destroy(sem_t sem)
 {
-	if(sem ==NULL || queue_length(sem->wait_list) > 0){
+	if(!sem || queue_length(sem->wait_queue) > 0){
 		return -1;
 	}
+	queue_destroy(sem->wait_queue);
 	free(sem);
 	return 0;	
 }
 
 int sem_down(sem_t sem)
 {
+	if(!sem || !sem->wait_queue){
+		return -1;
+	}
 	if(sem->count >= 1){
-		--sem->count;
+		sem->count -= 1;
 		return 0;
 	}
-	else{
-		struct uthread_tcb* new_thread;
-		new_thread = malloc(sizeof(struct uthread_tcb));
-		new_thread = uthread_current();
-		if(!queue_dequeue(queue,(void**)&new_thread)){
-			queue_enqueue(sem->wait_list,(void*)new_thread);
+	if(sem->count == 0){
+		uthread_tcb *thread;
+		thread = malloc(sizeof(uthread_tcb));
+		thread = uthread_current();
+		if(!queue_dequeue(queue,(void**)&thread)){
+			queue_enqueue(sem->wait_queue,(void*)thread);
 			uthread_block();
 		}
 	}
-	return -1;
+	return 0;
 }
 
 int sem_up(sem_t sem)
 {
-	sem->count++;
-	struct uthread_tcb* new_thread;
-	new_thread = malloc(sizeof(struct uthread_tcb));
-	if(queue_length(sem->wait_list) > 0){
-		if(!queue_dequeue(sem->wait_list,(void**)&new_thread)){
+	sem->count ++;
+	uthread_tcb* thread;
+	thread = malloc(sizeof(uthread_tcb));
+	if(!sem->wait_queue || !sem){
+		return -1;
+	}
+	if(queue_length(sem->wait_queue) > 0){
+		if(!queue_dequeue(sem->wait_queue,(void**)&thread)){
 			if(sem->count > 0){
-				uthread_unblock(new_thread);
+				uthread_unblock(thread);
 			}
 			else{
-				queue_enqueue(sem->wait_list,(void*)new_thread);
+				queue_enqueue(sem->wait_queue,(void*)thread);
 			}
 		}
 	}
