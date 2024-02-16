@@ -21,7 +21,7 @@ typedef struct uthread_tcb{
 	void *top_of_stack;
 }uthread_tcb;
 
-static queue_t queue;
+extern queue_t queue;
 
 sem_t sem_create(size_t count)
 {
@@ -85,4 +85,3 @@ int sem_up(sem_t sem)
 	}
 	return 0;
 }
-
