@@ -16,21 +16,21 @@
 #define running 2
 #define idle 3
 #define exited 4
-#define UNUSED(x) (void)(x)
 
-struct uthread_tcb {
+
+typedef struct uthread_tcb {
 	int state;
 	uthread_ctx_t *context;
 	uthread_func_t func;
 	void *arg;
 	void *top_of_stack;
-};
+}uthread_tcb;
 
 /* thread queue */
 queue_t queue;
 queue_t idle_q;
-struct uthread_tcb *main_thread;
-struct uthread_tcb *active_thread;
+uthread_tcb *main_thread;
+uthread_tcb *active_thread;
 
 struct uthread_tcb *uthread_current(void)
 {
@@ -40,12 +40,12 @@ struct uthread_tcb *uthread_current(void)
 /* running thread will be at top of queue */
 void MoveToTop(queue_t queue){
 	/* current thread */
-	struct uthread_tcb *uthread_current;
-	uthread_current = malloc(sizeof(struct uthread_tcb));
+	uthread_tcb *uthread_current;
+	uthread_current = malloc(sizeof(uthread_tcb));
 	uthread_current->top_of_stack = uthread_ctx_alloc_stack();
 	uthread_current->context = uthread_ctx_alloc_stack();
-	/* running thread */
-	active_thread = malloc(sizeof(struct uthread_tcb));
+	/* active thread */
+	active_thread = malloc(sizeof(uthread_tcb));
 	active_thread->top_of_stack = uthread_ctx_alloc_stack();
 	active_thread->context = uthread_ctx_alloc_stack();
 
@@ -73,7 +73,7 @@ void MoveToTop(queue_t queue){
 void uthread_yield(void)
 {
     if (queue_length(queue) > 0) {
-        struct uthread_tcb *old_thread = active_thread;
+        uthread_tcb *old_thread = active_thread;
 
         if (queue_dequeue(queue, (void**)&active_thread) == 0) {
             active_thread->state = running;
@@ -97,7 +97,7 @@ void uthread_exit(void)
         uthread_yield();
     }
     else {
-        struct uthread_tcb *next_thread;
+        uthread_tcb *next_thread;
         if (!queue_dequeue(idle_q, (void**)&next_thread)) {
             uthread_ctx_switch(active_thread->context, next_thread->context);
         }
@@ -106,7 +106,8 @@ void uthread_exit(void)
 
 int uthread_create(uthread_func_t func, void *arg)
 {
-	struct uthread_tcb *new_thread = malloc(sizeof(struct uthread_tcb));
+	/* create new thread */
+	uthread_tcb *new_thread = malloc(sizeof(uthread_tcb));
 	if(new_thread == NULL){
 		return -1;
 	}
@@ -116,13 +117,11 @@ int uthread_create(uthread_func_t func, void *arg)
 	new_thread->state = ready;
 	new_thread->top_of_stack = uthread_ctx_alloc_stack();
 	queue_enqueue(queue,new_thread);
-	if(new_thread->top_of_stack == NULL){
+	if(new_thread->top_of_stack == NULL || uthread_ctx_init(new_thread->context, new_thread->top_of_stack, 
+	new_thread->func, new_thread->arg) == -1){
 		return -1;
 	}
-	if(uthread_ctx_init(new_thread->context, new_thread->top_of_stack, new_thread->func, new_thread->arg) == -1)
-	{
-		return -1;
-	}
+
 	return 0;
 }
 
@@ -132,14 +131,14 @@ int uthread_run(bool preempt, uthread_func_t func, void *arg)
 		preempt_start(preempt);
 		preempt_enable();
 	}
-	struct uthread_tcb* main_thread = malloc(sizeof(struct uthread_tcb));
+	uthread_tcb* main_thread = malloc(sizeof(uthread_tcb));
 	main_thread->context = malloc(sizeof(uthread_ctx_t));
 	if (main_thread == NULL||main_thread->context == NULL){
 		return -1;
 	}
 	if(queue == NULL){
-		struct uthread_tcb *initial_thread;
-		initial_thread = malloc(sizeof(struct uthread_tcb));
+		uthread_tcb *initial_thread;
+		initial_thread = malloc(sizeof(uthread_tcb));
 		initial_thread->top_of_stack = uthread_ctx_alloc_stack();
 		initial_thread->context = uthread_ctx_alloc_stack();
 		queue = queue_create();
@@ -158,13 +157,13 @@ int uthread_run(bool preempt, uthread_func_t func, void *arg)
 	}
 	while(queue_length(queue) >= 1){
 		if(queue_length(queue) == 1){
-			struct uthread_tcb *final_thread;
-			final_thread = malloc(sizeof(struct uthread_tcb));
-			final_thread->top_of_stack = uthread_ctx_alloc_stack();
-			final_thread->context = uthread_ctx_alloc_stack();
-			if(!queue_dequeue(queue,(void**)&final_thread)){
-				final_thread->state = running;
-				uthread_ctx_switch(main_thread->context,final_thread->context);
+			uthread_tcb *last_thread;
+			last_thread = malloc(sizeof(uthread_tcb));
+			last_thread->top_of_stack = uthread_ctx_alloc_stack();
+			last_thread->context = uthread_ctx_alloc_stack();
+			if(!queue_dequeue(queue,(void**)&last_thread)){
+				last_thread->state = running;
+				uthread_ctx_switch(main_thread->context,last_thread->context);
 			}
 			return 0;
 		}
@@ -179,12 +178,12 @@ int uthread_run(bool preempt, uthread_func_t func, void *arg)
 void uthread_block(void)
 {
 	preempt_disable();
-	struct uthread_tcb* blocked_thread;
-	blocked_thread = malloc(sizeof(struct uthread_tcb));
+	uthread_tcb* blocked_thread;
+	blocked_thread = malloc(sizeof(uthread_tcb));
 	blocked_thread = active_thread;
 	blocked_thread->state = blocked;
-	struct uthread_tcb* next_thread;
-	next_thread = malloc(sizeof(struct uthread_tcb));
+	uthread_tcb* next_thread;
+	next_thread = malloc(sizeof(uthread_tcb));
 	if(!queue_dequeue(queue,(void**)&next_thread)){
 		queue_enqueue(queue,next_thread);
 		next_thread->state = running;
@@ -199,7 +198,7 @@ void uthread_block(void)
 	preempt_enable();
 }
 
-void uthread_unblock(struct uthread_tcb *uthread)
+void uthread_unblock(uthread_tcb *uthread)
 {
 	preempt_disable();
 	MoveToTop(queue);
