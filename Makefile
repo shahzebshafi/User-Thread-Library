@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror
 LIB = libuthread.a
-OBJS = queue.o context.o uthread.o preempt.o
+OBJS = queue.o context.o uthread.o preempt.o sem.o
 
 all: $(LIB)
 
