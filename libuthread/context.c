@@ -51,7 +51,8 @@ int uthread_ctx_init(uthread_ctx_t *uctx, void *top_of_stack,
 {
         /*
          * Initialize the passed context @uctx to the currently active context
-                       if (getcontext(uctx))
+         */
+        if (getcontext(uctx))
                 return -1;
 
         /*
@@ -72,4 +73,5 @@ int uthread_ctx_init(uthread_ctx_t *uctx, void *top_of_stack,
 
         return 0;
 }
+
           
