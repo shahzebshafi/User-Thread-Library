@@ -129,7 +129,8 @@ int uthread_create(uthread_func_t func, void *arg)
 int uthread_run(bool preempt, uthread_func_t func, void *arg)
 {
 	if(preempt){
-		
+		preempt_start(preempt);
+		preempt_enable();
 	}
 	struct uthread_tcb* main_thread = malloc(sizeof(struct uthread_tcb));
 	main_thread->context = malloc(sizeof(uthread_ctx_t));
@@ -177,6 +178,7 @@ int uthread_run(bool preempt, uthread_func_t func, void *arg)
 
 void uthread_block(void)
 {
+	preempt_disable();
 	struct uthread_tcb* blocked_thread;
 	blocked_thread = malloc(sizeof(struct uthread_tcb));
 	blocked_thread = active_thread;
@@ -194,14 +196,17 @@ void uthread_block(void)
 			uthread_ctx_switch(blocked_thread->context,next_thread->context);
 		}
 	}
+	preempt_enable();
 }
 
 void uthread_unblock(struct uthread_tcb *uthread)
 {
+	preempt_disable();
 	MoveToTop(queue);
 	if(!queue_dequeue(queue,(void**)&active_thread)){
 		uthread->state = running;
 		active_thread->state = idle;
 		uthread_ctx_switch(active_thread->context,uthread->context);
 	}
+	preempt_enable();
 }
